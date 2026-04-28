@@ -1,7 +1,7 @@
 [build]
-builder = "nixpacks"
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "node dist/index-http.js"
 healthcheckPath = "/health"
 restartPolicyType = "on_failure"
