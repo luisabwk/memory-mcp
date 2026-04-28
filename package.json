@@ -1,0 +1,48 @@
+{
+  "name": "memory-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for persistent memory — OAuth 2.1 + Supabase Vector",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "memory-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "start:http": "node dist/index-http.js",
+    "test": "vitest --passWithNoTests",
+    "lint": "eslint src/**/*.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "mcp",
+    "memory",
+    "supabase",
+    "vector",
+    "embeddings",
+    "ai"
+  ],
+  "author": "octoAgent",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.0",
+    "@supabase/supabase-js": "^2.45.4",
+    "dotenv": "^16.4.7",
+    "express": "^5.2.1",
+    "openai": "^4.73.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.10.2",
+    "@typescript-eslint/eslint-plugin": "^8.18.2",
+    "@typescript-eslint/parser": "^8.18.2",
+    "eslint": "^9.18.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
