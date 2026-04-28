@@ -131,7 +131,7 @@ export async function createMemoryMcpServer() {
     const getTool = new MemoryGetTool(supabase);
     const reinforceTool = new MemoryReinforceTool(supabase);
     const tools = buildTools();
-    const server = new Server({ name: 'octoagent-memory', version: '1.0.0' }, { capabilities: { tools: {} } });
+    const server = new Server({ name: 'memory-mcp', version: '1.0.0' }, { capabilities: { tools: {} } });
     server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { name, arguments: args } = request.params;

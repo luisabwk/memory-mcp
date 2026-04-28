@@ -153,7 +153,7 @@ export async function createMemoryMcpServer(): Promise<Server> {
   const tools = buildTools();
 
   const server = new Server(
-    { name: 'octoagent-memory', version: '1.0.0' },
+    { name: 'memory-mcp', version: '1.0.0' },
     { capabilities: { tools: {} } }
   );
 
