@@ -68,7 +68,7 @@ async function main() {
 
   // Health check (no auth)
   app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', service: 'memory-mcp', version: '2.0.0' });
+    res.json({ status: 'ok', service: 'memory-mcp', version: '2.1.0' });
   });
 
   // MCP endpoint with bearer auth
