@@ -49,7 +49,7 @@ async function main() {
     }));
     // Health check (no auth)
     app.get('/health', (_req, res) => {
-        res.json({ status: 'ok', service: 'octoagent-memory', version: '2.0.0-oauth' });
+        res.json({ status: 'ok', service: 'memory-mcp', version: '2.0.0' });
     });
     // MCP endpoint with bearer auth
     const bearerAuth = requireBearerAuth({ verifier: oauthProvider });
