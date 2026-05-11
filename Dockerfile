@@ -4,12 +4,12 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
-RUN npx tsc
+RUN npm run build
 
 FROM node:20-alpine
 WORKDIR /app
 COPY --from=builder /app/package.json /app/package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
-EXPOSE 8766
-CMD ["node", "dist/index-http.js"]
+EXPOSE 3000
+CMD ["node", "dist/index.js"]
