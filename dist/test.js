@@ -11,7 +11,7 @@ dotenv.config();
 const testConfig = {
     supabaseUrl: process.env.SUPABASE_URL,
     supabaseKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
-    openaiKey: process.env.OPENAI_API_KEY
+    openrouterKey: process.env.OPENROUTER_API_KEY
 };
 // Color codes for terminal output
 const colors = {
@@ -30,7 +30,10 @@ async function runTests() {
         // Initialize services
         log('1. Initializing services...', colors.yellow);
         const supabase = new SupabaseService(testConfig.supabaseUrl, testConfig.supabaseKey);
-        const embeddings = new EmbeddingsService(testConfig.openaiKey);
+        const embeddings = new EmbeddingsService({
+            apiKey: testConfig.openrouterKey,
+            baseURL: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
+        });
         const classifier = new SectorClassifier();
         log('✅ Services initialized', colors.green);
         // Test 1: Classifier

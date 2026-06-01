@@ -18,7 +18,7 @@ import { MemoryListTool } from './tools/list.js';
 import { MemoryGetTool } from './tools/get.js';
 import { MemoryReinforceTool } from './tools/reinforce.js';
 
-const requiredEnvVars = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'OPENAI_API_KEY'];
+const requiredEnvVars = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'OPENROUTER_API_KEY'];
 
 function assertEnv(): void {
   for (const envVar of requiredEnvVars) {
@@ -137,11 +137,20 @@ export async function createMemoryMcpServer(): Promise<Server> {
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
-  const embeddings = new EmbeddingsService(
-    process.env.OPENAI_API_KEY!,
-    process.env.EMBEDDING_MODEL || 'text-embedding-3-small',
-    parseInt(process.env.EMBEDDING_DIMENSIONS || '1536', 10)
-  );
+  // Single provider for the whole stack: OpenRouter. The model must be
+  // namespaced (`openai/...`); we normalize a bare model name for back-compat
+  // with the existing EMBEDDING_MODEL=text-embedding-3-small env.
+  const baseModel = process.env.EMBEDDING_MODEL || 'text-embedding-3-small';
+  const embeddings = new EmbeddingsService({
+    apiKey: process.env.OPENROUTER_API_KEY!,
+    baseURL: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
+    model: baseModel.includes('/') ? baseModel : `openai/${baseModel}`,
+    dimensions: parseInt(process.env.EMBEDDING_DIMENSIONS || '1536', 10),
+    defaultHeaders: {
+      'HTTP-Referer': process.env.OPENROUTER_REFERER || 'https://memory.bloko.dev',
+      'X-Title': 'octoAgent Memory MCP',
+    },
+  });
   const classifier = new SectorClassifier();
 
   const storeTool = new MemoryStoreTool(supabase, embeddings, classifier);

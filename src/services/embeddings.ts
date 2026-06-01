@@ -1,19 +1,39 @@
 /**
  * Embeddings Service
- * Handles text embedding generation using OpenAI
+ *
+ * Generates text embeddings via the OpenAI SDK pointed at OpenRouter.
+ * OpenRouter proxies `openai/text-embedding-3-small` to the real OpenAI model,
+ * so the vectors are byte-for-byte compatible with previously stored embeddings
+ * (verified: cosine 1.0). This keeps a single provider key (OpenRouter) for the
+ * whole stack.
  */
 
 import OpenAI from 'openai';
+
+export interface EmbeddingsConfig {
+  apiKey: string;
+  /** Provider base URL. Defaults to OpenRouter. */
+  baseURL?: string;
+  /** Model id. Via OpenRouter it must be namespaced, e.g. `openai/text-embedding-3-small`. */
+  model?: string;
+  dimensions?: number;
+  /** Extra headers (OpenRouter uses HTTP-Referer / X-Title for analytics). */
+  defaultHeaders?: Record<string, string>;
+}
 
 export class EmbeddingsService {
   private client: OpenAI;
   private model: string;
   private dimensions: number;
 
-  constructor(apiKey: string, model = 'text-embedding-3-small', dimensions = 1536) {
-    this.client = new OpenAI({ apiKey });
-    this.model = model;
-    this.dimensions = dimensions;
+  constructor(config: EmbeddingsConfig) {
+    this.client = new OpenAI({
+      apiKey: config.apiKey,
+      baseURL: config.baseURL,
+      defaultHeaders: config.defaultHeaders,
+    });
+    this.model = config.model ?? 'openai/text-embedding-3-small';
+    this.dimensions = config.dimensions ?? 1536;
   }
 
   /**
