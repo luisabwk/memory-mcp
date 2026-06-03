@@ -33,7 +33,8 @@ export class GoogleBroker {
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
     const baseUrl = process.env.BASE_URL;
     const allowed = process.env.ALLOWED_EMAILS;
-    if (!clientId || !clientSecret) throw new Error('Missing GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET');
+    if (!clientId) throw new Error('Missing GOOGLE_CLIENT_ID');
+    if (!clientSecret) throw new Error('Missing GOOGLE_CLIENT_SECRET');
     if (!baseUrl) throw new Error('Missing BASE_URL');
     if (!allowed) throw new Error('Missing ALLOWED_EMAILS');
     this.clientId = clientId;

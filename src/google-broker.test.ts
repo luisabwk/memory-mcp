@@ -107,4 +107,39 @@ describe('GoogleBroker', () => {
     mockGetToken.mockResolvedValue({ tokens: {} });
     await expect(b.verifyCallback(sid, 'code')).rejects.toMatchObject({ status: 502 });
   });
+
+  it('verifyCallback rejeita code ausente com 400', async () => {
+    const b = new GoogleBroker();
+    const sid = startAndCaptureSid(b);
+    await expect(b.verifyCallback(sid, undefined)).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('verifyCallback retorna 502 se getToken lançar', async () => {
+    const b = new GoogleBroker();
+    const sid = startAndCaptureSid(b);
+    mockGetToken.mockRejectedValue(new Error('network'));
+    await expect(b.verifyCallback(sid, 'code')).rejects.toMatchObject({ status: 502 });
+  });
+
+  it('verifyCallback retorna 502 se verifyIdToken lançar (assinatura inválida)', async () => {
+    const b = new GoogleBroker();
+    const sid = startAndCaptureSid(b);
+    mockGetToken.mockResolvedValue({ tokens: { id_token: 'idtok' } });
+    mockVerifyIdToken.mockRejectedValue(new Error('invalid signature'));
+    await expect(b.verifyCallback(sid, 'code')).rejects.toMatchObject({ status: 502 });
+  });
+
+  it('verifyCallback rejeita pendente expirado com 400', async () => {
+    vi.useFakeTimers();
+    try {
+      const b = new GoogleBroker();
+      const sid = startAndCaptureSid(b);
+      mockGetToken.mockResolvedValue({ tokens: { id_token: 'idtok' } });
+      mockVerifyIdToken.mockResolvedValue({ getPayload: () => ({ email: 'me@gmail.com', email_verified: true }) });
+      vi.advanceTimersByTime(5 * 60 * 1000 + 1); // passa do TTL de 5min
+      await expect(b.verifyCallback(sid, 'code')).rejects.toMatchObject({ status: 400 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
