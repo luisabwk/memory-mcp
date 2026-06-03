@@ -31,10 +31,10 @@ describe('makeMcpAuth', () => {
     mw(req, {} as any, next);
     expect(next).toHaveBeenCalledTimes(1);
     expect(oauthBearer).not.toHaveBeenCalled();
-    expect(req.auth.clientId).toBe('internal-service');
+    expect(req.auth).toEqual({ token: 'internal-service', clientId: 'internal-service', scopes: [] });
   });
 
-  it('NA PORTA PÚBLICA, service token é ignorado e cai pro OAuth bearer', () => {
+  it('na porta pública, service token é ignorado e cai pro OAuth bearer', () => {
     const next = vi.fn();
     const oauthBearer = vi.fn();
     const mw = makeMcpAuth({ internalPort: 8767, serviceToken: 'svc', oauthBearer });

@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
+import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 
 /** Compara o Bearer do header com o service token em tempo constante (digests SHA-256 de tamanho fixo). */
 export function serviceTokenValid(
@@ -33,7 +34,9 @@ export function makeMcpAuth(opts: McpAuthOptions) {
   return function mcpAuth(req: Request, res: Response, next: NextFunction): void {
     const localPort = req.socket.localPort;
     if (localPort === opts.internalPort && serviceTokenValid(req.headers['authorization'], opts.serviceToken)) {
-      (req as unknown as { auth: unknown }).auth = { token: 'service', clientId: 'internal-service', scopes: [] };
+      // `token` é um placeholder sintético: a identidade de serviço não usa um access token OAuth real.
+      const auth: AuthInfo = { token: 'internal-service', clientId: 'internal-service', scopes: [] };
+      req.auth = auth;
       next();
       return;
     }
