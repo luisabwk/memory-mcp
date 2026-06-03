@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 
 /**
- * octoAgent Memory MCP Server (Streamable HTTP + OAuth 2.1)
- * Serves MCP over HTTP with OAuth 2.1 authentication (DCR + PKCE).
+ * memory-mcp Server (Streamable HTTP + OAuth 2.1)
+ * Serves MCP over HTTP com OAuth 2.1 (DCR + PKCE), gateado por login Google (allowlist).
  * Required for claude.ai remote MCP integration.
+ *
+ * Duas portas: PUBLIC_PORT (roteada pelo Traefik, só OAuth bearer) e INTERNAL_PORT
+ * (só rede Docker, aceita MEMORY_SERVICE_TOKEN para clientes headless).
  *
  * MCP sessions: one StreamableHTTPServerTransport + McpServer per client session
  * (map keyed by mcp-session-id). A single global transport breaks all clients after
@@ -83,8 +86,11 @@ async function main() {
       const pending = await broker.verifyCallback(state, code);
       await oauthProvider.issueMcpCode(pending, res);
     } catch (err) {
+      console.error('Google callback error:', err);
       const status = err instanceof BrokerError ? err.status : 500;
-      const msg = err instanceof Error ? err.message : 'erro';
+      // Só mensagens de BrokerError (strings fixas do nosso código) vão pro HTML; demais
+      // erros viram mensagem genérica para não refletir conteúdo de terceiros (ex.: Supabase).
+      const msg = err instanceof BrokerError ? err.message : 'Internal error';
       res.status(status).send(`<!doctype html><meta charset="utf-8"><h1>Acesso negado (${status})</h1><p>${msg}</p>`);
     }
   });
@@ -142,6 +148,7 @@ async function main() {
   });
   app.listen(INTERNAL_PORT, '0.0.0.0', () => {
     console.error(`memory-mcp (interno, service token) ouvindo em http://0.0.0.0:${INTERNAL_PORT}`);
+    console.error(`  MCP interno: http://0.0.0.0:${INTERNAL_PORT}/mcp`);
   });
 }
 
