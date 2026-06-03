@@ -1,11 +1,12 @@
 /**
  * Supabase-backed OAuth 2.1 provider for the MCP SDK.
  * Implements OAuthServerProvider + OAuthRegisteredClientsStore.
- * Auto-approves authorization requests (personal server).
  *
- * Drop-in replacement for the original in-memory version.
- * Exported names are intentionally kept identical so index-http.ts
- * requires zero changes.
+ * authorize() NÃO auto-aprova: delega ao GoogleBroker, que prova a identidade
+ * (login Google + allowlist de e-mail) antes de qualquer code ser emitido. O code
+ * MCP só é gerado em issueMcpCode(), chamado pelo callback do Google após verificação.
+ *
+ * Exported names são mantidos por compat (InMemoryOAuthProvider / InMemoryClientsStore).
  *
  * Env vars required:
  *   SUPABASE_URL              — e.g. https://xxxx.supabase.co
@@ -15,6 +16,7 @@
 import { randomUUID, randomBytes } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Response } from 'express';
+import type { GoogleBroker, PendingAuth } from './google-broker.js';
 import type { OAuthServerProvider, AuthorizationParams } from '@modelcontextprotocol/sdk/server/auth/provider.js';
 import type { OAuthRegisteredClientsStore } from '@modelcontextprotocol/sdk/server/auth/clients.js';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
@@ -112,10 +114,12 @@ export class InMemoryClientsStore implements OAuthRegisteredClientsStore {
 export class InMemoryOAuthProvider implements OAuthServerProvider {
   readonly clientsStore: InMemoryClientsStore;
   private db: SupabaseClient;
+  private readonly broker: GoogleBroker;
 
-  constructor() {
+  constructor(broker: GoogleBroker) {
     this.db = getSupabase();
     this.clientsStore = new InMemoryClientsStore();
+    this.broker = broker;
   }
 
   async authorize(
@@ -123,26 +127,40 @@ export class InMemoryOAuthProvider implements OAuthServerProvider {
     params: AuthorizationParams,
     res: Response
   ): Promise<void> {
+    // Não auto-aprova: estaciona o pedido e manda o navegador pro Google.
+    const url = this.broker.startLogin({
+      clientId: client.client_id,
+      redirectUri: params.redirectUri,
+      codeChallenge: params.codeChallenge,
+      scopes: params.scopes ?? [],
+      state: params.state,
+    });
+    res.redirect(url);
+  }
+
+  /**
+   * Emite o auth code MCP DEPOIS que a identidade foi provada no Google.
+   * CONTRATO: só pode ser chamado pelo callback do Google, com o `pending` retornado
+   * por `GoogleBroker.verifyCallback()` (que já validou e-mail + assinatura). NÃO chame
+   * direto de nenhum outro lugar — isso bypassaria o gate de identidade.
+   */
+  async issueMcpCode(pending: PendingAuth, res: Response): Promise<void> {
     const code = `code_${randomBytes(24).toString('hex')}`;
     const now = Math.floor(Date.now() / 1000);
-
     const { error } = await this.db.from('oauth_auth_codes').insert({
       code,
-      client_id: client.client_id!,
-      code_challenge: params.codeChallenge,
-      redirect_uri: params.redirectUri,
-      scopes: params.scopes ?? [],
+      client_id: pending.clientId,
+      code_challenge: pending.codeChallenge,
+      redirect_uri: pending.redirectUri,
+      scopes: pending.scopes ?? [],
       expires_at: new Date((now + AUTH_CODE_TTL) * 1000).toISOString(),
     });
-
-    if (error) throw new Error(`authorize DB error: ${error.message}`);
-
-    const redirectUrl = new URL(params.redirectUri);
+    if (error) throw new Error(`issueMcpCode DB error: ${error.message}`);
+    const redirectUrl = new URL(pending.redirectUri);
     redirectUrl.searchParams.set('code', code);
-    if (params.state) {
-      redirectUrl.searchParams.set('state', params.state);
+    if (pending.state) {
+      redirectUrl.searchParams.set('state', pending.state);
     }
-
     res.redirect(redirectUrl.toString());
   }
 

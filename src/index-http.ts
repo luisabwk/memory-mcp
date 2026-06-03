@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 
 /**
- * octoAgent Memory MCP Server (Streamable HTTP + OAuth 2.1)
- * Serves MCP over HTTP with OAuth 2.1 authentication (DCR + PKCE).
+ * memory-mcp Server (Streamable HTTP + OAuth 2.1)
+ * Serves MCP over HTTP com OAuth 2.1 (DCR + PKCE), gateado por login Google (allowlist).
  * Required for claude.ai remote MCP integration.
+ *
+ * Duas portas: PUBLIC_PORT (roteada pelo Traefik, só OAuth bearer) e INTERNAL_PORT
+ * (só rede Docker, aceita MEMORY_SERVICE_TOKEN para clientes headless).
  *
  * MCP sessions: one StreamableHTTPServerTransport + McpServer per client session
  * (map keyed by mcp-session-id). A single global transport breaks all clients after
@@ -20,11 +23,14 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { createMemoryMcpServer } from './server.js';
 import { InMemoryOAuthProvider } from './auth-provider.js';
+import { GoogleBroker, BrokerError } from './google-broker.js';
+import { makeMcpAuth } from './mcp-auth.js';
 
 dotenv.config();
 
-const PORT = parseInt(process.env.MCP_HTTP_PORT ?? process.env.PORT ?? '8766', 10);
-const BASE_URL = process.env.BASE_URL ?? `http://localhost:${PORT}`;
+const PUBLIC_PORT = parseInt(process.env.MCP_HTTP_PORT ?? process.env.PORT ?? '3000', 10);
+const INTERNAL_PORT = parseInt(process.env.INTERNAL_PORT ?? '8767', 10);
+const BASE_URL = process.env.BASE_URL ?? `http://localhost:${PUBLIC_PORT}`;
 
 /** Idle MCP sessions are removed after this many ms (default 2h). */
 const SESSION_TTL_MS = parseInt(process.env.MCP_SESSION_TTL_MS ?? String(2 * 60 * 60 * 1000), 10);
@@ -53,8 +59,9 @@ async function main() {
   app.set('trust proxy', 1);
   app.use(express.json());
 
-  // OAuth 2.1 provider (auto-approves, in-memory tokens)
-  const oauthProvider = new InMemoryOAuthProvider();
+  // Broker Google (login + allowlist) — gate de identidade antes de emitir qualquer token.
+  const broker = new GoogleBroker();
+  const oauthProvider = new InMemoryOAuthProvider(broker);
 
   // Mount OAuth routes (/.well-known, /authorize, /token, /register)
   app.use(
@@ -62,7 +69,7 @@ async function main() {
       provider: oauthProvider,
       issuerUrl: new URL(BASE_URL),
       baseUrl: new URL(BASE_URL),
-      serviceDocumentationUrl: new URL('https://github.com/luisabwk/octoAgent'),
+      serviceDocumentationUrl: new URL('https://github.com/luisabwk/memory-mcp'),
     })
   );
 
@@ -71,12 +78,34 @@ async function main() {
     res.json({ status: 'ok', service: 'memory-mcp', version: '2.1.0' });
   });
 
-  // MCP endpoint with bearer auth
-  const bearerAuth = requireBearerAuth({ verifier: oauthProvider });
+  // Callback do Google: prova de identidade antes de emitir o code MCP.
+  app.get('/auth/google/callback', async (req, res) => {
+    try {
+      const state = typeof req.query.state === 'string' ? req.query.state : undefined;
+      const code = typeof req.query.code === 'string' ? req.query.code : undefined;
+      const pending = await broker.verifyCallback(state, code);
+      await oauthProvider.issueMcpCode(pending, res);
+    } catch (err) {
+      console.error('Google callback error:', err);
+      const status = err instanceof BrokerError ? err.status : 500;
+      // Só mensagens de BrokerError (strings fixas do nosso código) vão pro HTML; demais
+      // erros viram mensagem genérica para não refletir conteúdo de terceiros (ex.: Supabase).
+      const msg = err instanceof BrokerError ? err.message : 'Internal error';
+      res.status(status).send(`<!doctype html><meta charset="utf-8"><h1>Acesso negado (${status})</h1><p>${msg}</p>`);
+    }
+  });
+
+  // MCP endpoint: porta pública só aceita OAuth bearer; porta interna também aceita service token.
+  const oauthBearer = requireBearerAuth({ verifier: oauthProvider });
+  const mcpAuth = makeMcpAuth({
+    internalPort: INTERNAL_PORT,
+    serviceToken: process.env.MEMORY_SERVICE_TOKEN,
+    oauthBearer,
+  });
 
   setInterval(sweepIdleSessions, SESSION_SWEEP_MS).unref();
 
-  app.all('/mcp', bearerAuth, async (req, res) => {
+  app.all('/mcp', mcpAuth, async (req, res) => {
     const raw = req.headers['mcp-session-id'];
     const sessionId = Array.isArray(raw) ? raw[0] : raw;
 
@@ -112,12 +141,14 @@ async function main() {
     await transport.handleRequest(req, res, req.body);
   });
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.error(`octoAgent Memory MCP (OAuth 2.1) listening on http://0.0.0.0:${PORT}`);
-    console.error(`  Base URL:    ${BASE_URL}`);
-    console.error(`  MCP:         ${BASE_URL}/mcp`);
-    console.error(`  Health:      ${BASE_URL}/health`);
-    console.error(`  OAuth meta:  ${BASE_URL}/.well-known/oauth-authorization-server`);
+  app.listen(PUBLIC_PORT, '0.0.0.0', () => {
+    console.error(`memory-mcp (público) ouvindo em http://0.0.0.0:${PUBLIC_PORT}`);
+    console.error(`  Base URL:   ${BASE_URL}`);
+    console.error(`  OAuth meta: ${BASE_URL}/.well-known/oauth-authorization-server`);
+  });
+  app.listen(INTERNAL_PORT, '0.0.0.0', () => {
+    console.error(`memory-mcp (interno, service token) ouvindo em http://0.0.0.0:${INTERNAL_PORT}`);
+    console.error(`  MCP interno: http://0.0.0.0:${INTERNAL_PORT}/mcp`);
   });
 }
 

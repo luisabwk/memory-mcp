@@ -11,5 +11,7 @@ WORKDIR /app
 COPY --from=builder /app/package.json /app/package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
-EXPOSE 3000
+# 3000 = porta pública (roteada pelo Traefik, só OAuth bearer).
+# 8767 = porta interna (só rede Docker, aceita MEMORY_SERVICE_TOKEN). NÃO publicar no Traefik.
+EXPOSE 3000 8767
 CMD ["node", "dist/index-http.js"]
