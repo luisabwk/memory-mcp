@@ -15,6 +15,7 @@
 import { randomUUID, randomBytes } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Response } from 'express';
+import type { GoogleBroker, PendingAuth } from './google-broker.js';
 import type { OAuthServerProvider, AuthorizationParams } from '@modelcontextprotocol/sdk/server/auth/provider.js';
 import type { OAuthRegisteredClientsStore } from '@modelcontextprotocol/sdk/server/auth/clients.js';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
@@ -112,10 +113,12 @@ export class InMemoryClientsStore implements OAuthRegisteredClientsStore {
 export class InMemoryOAuthProvider implements OAuthServerProvider {
   readonly clientsStore: InMemoryClientsStore;
   private db: SupabaseClient;
+  private readonly broker: GoogleBroker;
 
-  constructor() {
+  constructor(broker: GoogleBroker) {
     this.db = getSupabase();
     this.clientsStore = new InMemoryClientsStore();
+    this.broker = broker;
   }
 
   async authorize(
@@ -123,26 +126,35 @@ export class InMemoryOAuthProvider implements OAuthServerProvider {
     params: AuthorizationParams,
     res: Response
   ): Promise<void> {
+    // Não auto-aprova: estaciona o pedido e manda o navegador pro Google.
+    const url = this.broker.startLogin({
+      clientId: client.client_id!,
+      redirectUri: params.redirectUri,
+      codeChallenge: params.codeChallenge,
+      scopes: params.scopes ?? [],
+      state: params.state,
+    });
+    res.redirect(url);
+  }
+
+  /** Emite o auth code MCP DEPOIS que a identidade foi provada no Google. */
+  async issueMcpCode(pending: PendingAuth, res: Response): Promise<void> {
     const code = `code_${randomBytes(24).toString('hex')}`;
     const now = Math.floor(Date.now() / 1000);
-
     const { error } = await this.db.from('oauth_auth_codes').insert({
       code,
-      client_id: client.client_id!,
-      code_challenge: params.codeChallenge,
-      redirect_uri: params.redirectUri,
-      scopes: params.scopes ?? [],
+      client_id: pending.clientId,
+      code_challenge: pending.codeChallenge,
+      redirect_uri: pending.redirectUri,
+      scopes: pending.scopes ?? [],
       expires_at: new Date((now + AUTH_CODE_TTL) * 1000).toISOString(),
     });
-
-    if (error) throw new Error(`authorize DB error: ${error.message}`);
-
-    const redirectUrl = new URL(params.redirectUri);
+    if (error) throw new Error(`issueMcpCode DB error: ${error.message}`);
+    const redirectUrl = new URL(pending.redirectUri);
     redirectUrl.searchParams.set('code', code);
-    if (params.state) {
-      redirectUrl.searchParams.set('state', params.state);
+    if (pending.state) {
+      redirectUrl.searchParams.set('state', pending.state);
     }
-
     res.redirect(redirectUrl.toString());
   }
 
