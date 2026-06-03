@@ -129,6 +129,14 @@ describe('GoogleBroker', () => {
     await expect(b.verifyCallback(sid, 'code')).rejects.toMatchObject({ status: 502 });
   });
 
+  it('verifyCallback retorna 502 se o id_token não trouxer claim email', async () => {
+    const b = new GoogleBroker();
+    const sid = startAndCaptureSid(b);
+    mockGetToken.mockResolvedValue({ tokens: { id_token: 'idtok' } });
+    mockVerifyIdToken.mockResolvedValue({ getPayload: () => ({ email_verified: true }) });
+    await expect(b.verifyCallback(sid, 'code')).rejects.toMatchObject({ status: 502 });
+  });
+
   it('verifyCallback rejeita pendente expirado com 400', async () => {
     vi.useFakeTimers();
     try {

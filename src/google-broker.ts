@@ -61,7 +61,12 @@ export class GoogleBroker {
     });
   }
 
-  /** Valida o callback do Google. Devolve o pendente se a identidade for permitida; senão lança BrokerError. */
+  /**
+   * Valida o callback do Google. Devolve o pendente se a identidade for permitida; senão lança BrokerError.
+   * NOTA: o `codeChallenge` (PKCE) no PendingAuth NÃO é validado aqui — o Google é usado só como
+   * provedor de identidade. O PKCE do fluxo MCP é enforçado pela camada de cima
+   * (auth-provider `challengeForAuthorizationCode`/`exchangeAuthorizationCode`).
+   */
   async verifyCallback(state: string | undefined, code: string | undefined): Promise<PendingAuth> {
     if (!state) throw new BrokerError(400, 'Missing state');
     if (!code) throw new BrokerError(400, 'Missing code');
@@ -90,7 +95,8 @@ export class GoogleBroker {
     }
     if (!payload) throw new BrokerError(502, 'Empty id_token payload');
     if (payload.email_verified !== true) throw new BrokerError(403, 'Email not verified');
-    const email = (payload.email ?? '').toLowerCase();
+    if (!payload.email) throw new BrokerError(502, 'id_token missing email claim');
+    const email = payload.email.toLowerCase();
     if (!this.allowed.has(email)) throw new BrokerError(403, 'Email not allowed');
 
     const { createdAt: _createdAt, ...rest } = stored;
