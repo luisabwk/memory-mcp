@@ -30,6 +30,7 @@ describe('authorize', () => {
     expect(broker.startLogin).toHaveBeenCalledWith({
       clientId: 'c1', redirectUri: 'https://app/cb', codeChallenge: 'ch', scopes: ['memory'], state: 's',
     });
+    expect(res.redirect).toHaveBeenCalledTimes(1);
     expect(res.redirect).toHaveBeenCalledWith('https://accounts.google.com/login?mock');
     expect(insertMock).not.toHaveBeenCalled();
   });
@@ -44,10 +45,30 @@ describe('issueMcpCode', () => {
       res,
     );
     expect(insertMock).toHaveBeenCalledTimes(1);
+    expect(insertMock).toHaveBeenCalledWith(expect.objectContaining({
+      code: expect.stringMatching(/^code_/),
+      client_id: 'c1',
+      code_challenge: 'ch',
+      redirect_uri: 'https://app/cb',
+      scopes: ['memory'],
+      expires_at: expect.any(String),
+    }));
+    expect(res.redirect).toHaveBeenCalledTimes(1);
     const url = res.redirect.mock.calls[0][0] as string;
     expect(url).toContain('https://app/cb?');
     expect(url).toContain('code=code_');
     expect(url).toContain('state=s');
+  });
+
+  it('lança se o insert no Supabase falhar', async () => {
+    insertMock.mockResolvedValueOnce({ error: { message: 'db down' } });
+    const provider = new InMemoryOAuthProvider(fakeBroker() as any);
+    const res: any = { redirect: vi.fn() };
+    await expect(provider.issueMcpCode(
+      { clientId: 'c1', redirectUri: 'https://app/cb', codeChallenge: 'ch', scopes: [] },
+      res,
+    )).rejects.toThrow(/issueMcpCode DB error/);
+    expect(res.redirect).not.toHaveBeenCalled();
   });
 
   it('omite state quando não fornecido', async () => {
