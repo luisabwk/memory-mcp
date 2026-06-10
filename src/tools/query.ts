@@ -36,7 +36,7 @@ export class MemoryQueryTool {
       const params: MemoryQueryParams = {
         query: input.query,
         limit: input.limit || 10,
-        min_score: input.min_score || 0.7,
+        min_score: input.min_score || 0.4,
         sector: input.sector,
         source_type: input.source_type,
         source_path: input.source_path,

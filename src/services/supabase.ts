@@ -41,7 +41,7 @@ export class SupabaseService {
   async queryMemories(params: MemoryQueryParams, queryEmbedding: number[]): Promise<MemoryQueryResult[]> {
     const { 
       limit = 10, 
-      min_score = 0.7,
+      min_score = 0.4,
       sector,
       source_type,
       source_path,
