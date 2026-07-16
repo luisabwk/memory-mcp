@@ -59,7 +59,7 @@ function buildTools() {
                 properties: {
                     query: { type: 'string', description: 'The search query' },
                     limit: { type: 'number', description: 'Maximum number of results (default: 10, max: 100)', default: 10 },
-                    min_score: { type: 'number', description: 'Minimum similarity score 0-1 (default: 0.7)', default: 0.7 },
+                    min_score: { type: 'number', description: 'Minimum similarity score 0-1 (default: 0.4)', default: 0.4 },
                     sector: {
                         type: 'string',
                         enum: ['episodic', 'semantic', 'procedural', 'emotional', 'reflective'],

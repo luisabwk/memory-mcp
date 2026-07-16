@@ -31,7 +31,7 @@ export class SupabaseService {
      * Query memories by vector similarity
      */
     async queryMemories(params, queryEmbedding) {
-        const { limit = 10, min_score = 0.7, sector, source_type, source_path, project_name, tags } = params;
+        const { limit = 10, min_score = 0.4, sector, source_type, source_path, project_name, tags } = params;
         // Build query
         let query = this.client
             .from('memories')
@@ -139,11 +139,25 @@ export class SupabaseService {
      * Update access tracking for a memory
      */
     async updateAccessTracking(id) {
+        // Lê o contador atual e incrementa. O código antigo atribuía o próprio query-builder
+        // (não-awaited) ao access_count — o supabase-js serializava o builder em JSON e o
+        // PostgREST recusava com "invalid input syntax for type integer". Para um servidor
+        // single-user, read-then-write é suficiente (a race de concorrência real é irrelevante).
+        const { data: current, error: readError } = await this.client
+            .from('memories')
+            .select('access_count')
+            .eq('id', id)
+            .single();
+        if (readError) {
+            console.warn(`Failed to read access_count: ${readError.message}`);
+            return;
+        }
+        const nextCount = (current?.access_count ?? 0) + 1;
         const { error } = await this.client
             .from('memories')
             .update({
             last_accessed_at: new Date().toISOString(),
-            access_count: this.client.from('memories').select('access_count').eq('id', id)
+            access_count: nextCount
         })
             .eq('id', id);
         if (error) {

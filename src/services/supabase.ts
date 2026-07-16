@@ -180,11 +180,28 @@ export class SupabaseService {
    * Update access tracking for a memory
    */
   private async updateAccessTracking(id: string): Promise<void> {
+    // Lê o contador atual e incrementa. O código antigo atribuía o próprio query-builder
+    // (não-awaited) ao access_count — o supabase-js serializava o builder em JSON e o
+    // PostgREST recusava com "invalid input syntax for type integer". Para um servidor
+    // single-user, read-then-write é suficiente (a race de concorrência real é irrelevante).
+    const { data: current, error: readError } = await this.client
+      .from('memories')
+      .select('access_count')
+      .eq('id', id)
+      .single();
+
+    if (readError) {
+      console.warn(`Failed to read access_count: ${readError.message}`);
+      return;
+    }
+
+    const nextCount = ((current?.access_count as number | null) ?? 0) + 1;
+
     const { error } = await this.client
       .from('memories')
       .update({
         last_accessed_at: new Date().toISOString(),
-        access_count: this.client.from('memories').select('access_count').eq('id', id)
+        access_count: nextCount
       })
       .eq('id', id);
 

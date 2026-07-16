@@ -32,8 +32,8 @@ const PUBLIC_PORT = parseInt(process.env.MCP_HTTP_PORT ?? process.env.PORT ?? '3
 const INTERNAL_PORT = parseInt(process.env.INTERNAL_PORT ?? '8767', 10);
 const BASE_URL = process.env.BASE_URL ?? `http://localhost:${PUBLIC_PORT}`;
 
-/** Idle MCP sessions are removed after this many ms (default 2h). */
-const SESSION_TTL_MS = parseInt(process.env.MCP_SESSION_TTL_MS ?? String(2 * 60 * 60 * 1000), 10);
+/** Idle MCP sessions are removed after this many ms (default 24h). */
+const SESSION_TTL_MS = parseInt(process.env.MCP_SESSION_TTL_MS ?? String(24 * 60 * 60 * 1000), 10);
 const SESSION_SWEEP_MS = parseInt(process.env.MCP_SESSION_SWEEP_MS ?? String(15 * 60 * 1000), 10);
 
 type SessionEntry = {
@@ -117,6 +117,23 @@ async function main() {
       return;
     }
 
+    // Session id enviado mas desconhecido (expirou/foi varrido, ou o servidor reiniciou).
+    // Responde 404 — não 400 — para que o cliente MCP re-inicialize sozinho, conforme a spec
+    // Streamable HTTP. O 400 anterior travava o cliente sem recuperação (ele reenviava o mesmo
+    // session-id morto indefinidamente → "Tool execution failed").
+    if (sessionId) {
+      res.status(404).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32001,
+          message: 'Session not found or expired; please reinitialize (send a POST initialize with no mcp-session-id).',
+        },
+        id: null,
+      });
+      return;
+    }
+
+    // Sem session id: a primeira requisição precisa ser um initialize.
     if (req.method !== 'POST' || req.body === undefined || !isInitializeRequest(req.body)) {
       res.status(400).json({
         jsonrpc: '2.0',
