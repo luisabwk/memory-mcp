@@ -1,1 +1,0 @@
-{"version":3,"file":"get.d.ts","sourceRoot":"","sources":["../../src/tools/get.ts"],"names":[],"mappings":"AAAA;;;GAGG;AAEH,OAAO,KAAK,EAAE,eAAe,EAAE,MAAM,yBAAyB,CAAC;AAE/D,MAAM,WAAW,cAAc;IAC7B,EAAE,EAAE,MAAM,CAAC;CACZ;AAED,qBAAa,aAAa;IACZ,OAAO,CAAC,QAAQ;gBAAR,QAAQ,EAAE,eAAe;IAEvC,OAAO,CAAC,KAAK,EAAE,cAAc;;;;;;;;;;;;;;;;;;;;;;;;;IAmCnC,OAAO,CAAC,aAAa;CAWtB"}
