@@ -19,6 +19,15 @@ export function serviceTokenValid(
 export interface McpAuthOptions {
   internalPort: number;
   serviceToken: string | undefined;
+  /**
+   * Identity the internal service-token bypass maps to. Confirmed by Lu (2026-09-01):
+   * headless/automation clients hitting the internal port map to her identity by
+   * default — no separate pseudo-user for now. Required whenever `serviceToken` is
+   * set: a service token with no mapped identity would mint an AuthInfo with no
+   * email, which server.ts must then reject — so this option is validated present
+   * at startup (see index-http.ts) rather than silently omitted here.
+   */
+  serviceTokenUserEmail: string | undefined;
   /** Middleware OAuth bearer do MCP SDK (requireBearerAuth). */
   oauthBearer: (req: Request, res: Response, next: NextFunction) => void;
 }
@@ -35,7 +44,13 @@ export function makeMcpAuth(opts: McpAuthOptions) {
     const localPort = req.socket.localPort;
     if (localPort === opts.internalPort && serviceTokenValid(req.headers['authorization'], opts.serviceToken)) {
       // `token` é um placeholder sintético: a identidade de serviço não usa um access token OAuth real.
-      const auth: AuthInfo = { token: 'internal-service', clientId: 'internal-service', scopes: [] };
+      // `extra.email` é a mesma identidade confiável que o fluxo OAuth carrega — ver server.ts.
+      const auth: AuthInfo = {
+        token: 'internal-service',
+        clientId: 'internal-service',
+        scopes: [],
+        extra: opts.serviceTokenUserEmail ? { email: opts.serviceTokenUserEmail } : undefined,
+      };
       req.auth = auth;
       next();
       return;

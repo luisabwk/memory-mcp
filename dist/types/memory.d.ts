@@ -19,7 +19,13 @@ export interface Memory {
     updated_at: string;
     last_accessed_at?: string;
     access_count: number;
-    user_id?: string;
+    /**
+     * Owner's authenticated email — the sole per-user scoping key. Required, never
+     * optional: every read/write path filters on this. It is set server-side from
+     * the trusted identity (OAuth AuthInfo.extra.email or the stdio local-user env),
+     * NEVER from client-supplied tool arguments — see server.ts.
+     */
+    user_id: string;
 }
 export interface MemoryInsert {
     content: string;
@@ -31,7 +37,8 @@ export interface MemoryInsert {
     repository_url?: string;
     metadata?: Record<string, unknown>;
     tags?: string[];
-    user_id?: string;
+    /** Trusted, server-injected owner email. See Memory.user_id. */
+    user_id: string;
 }
 export interface MemoryQueryParams {
     query: string;
@@ -42,6 +49,8 @@ export interface MemoryQueryParams {
     source_path?: string;
     project_name?: string;
     tags?: string[];
+    /** Trusted, server-injected owner email. See Memory.user_id. */
+    user_id: string;
 }
 export interface MemoryListParams {
     sector?: MemorySector;
@@ -53,6 +62,8 @@ export interface MemoryListParams {
     offset?: number;
     order_by?: 'created_at' | 'updated_at' | 'last_accessed_at' | 'access_count';
     order?: 'asc' | 'desc';
+    /** Trusted, server-injected owner email. See Memory.user_id. */
+    user_id: string;
 }
 export interface MemoryQueryResult extends Memory {
     similarity: number;

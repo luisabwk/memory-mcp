@@ -93,7 +93,9 @@ export class GoogleBroker {
         if (!this.allowed.has(email))
             throw new BrokerError(403, 'Email not allowed');
         const { createdAt: _createdAt, ...rest } = stored;
-        return rest;
+        // A verificação acima (allowlist + email_verified) é o único lugar do sistema
+        // que prova a identidade — daqui em diante `email` viaja como dado confiável.
+        return { ...rest, email };
     }
     sweep() {
         const now = Date.now();

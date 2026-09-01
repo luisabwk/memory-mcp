@@ -1,25 +1,23 @@
 /**
  * Memory Store Tool
- * Stores a new memory in the global system
+ * Stores a new memory, scoped to the authenticated caller.
  */
+import { notifyGraphitiBridge } from '../services/graphiti-bridge.js';
 export class MemoryStoreTool {
-    supabase;
+    memoryService;
     embeddings;
     classifier;
-    constructor(supabase, embeddings, classifier) {
-        this.supabase = supabase;
+    constructor(memoryService, embeddings, classifier) {
+        this.memoryService = memoryService;
         this.embeddings = embeddings;
         this.classifier = classifier;
     }
-    async execute(input) {
+    /** `userId` is the trusted, server-injected owner email — see server.ts. Never accept it via `input`. */
+    async execute(input, userId) {
         try {
-            // Validate input
             this.validateInput(input);
-            // Generate embedding
             const embedding = await this.embeddings.generateEmbedding(input.content);
-            // Classify sector if not provided
             const sector = input.sector || this.classifier.classify(input.content);
-            // Prepare memory insert
             const memoryInsert = {
                 content: input.content,
                 embedding,
@@ -29,10 +27,16 @@ export class MemoryStoreTool {
                 project_name: input.project_name,
                 repository_url: input.repository_url,
                 metadata: input.metadata || {},
-                tags: input.tags || []
+                tags: input.tags || [],
+                user_id: userId,
             };
-            // Store in database
-            const memory = await this.supabase.storeMemory(memoryInsert);
+            const memory = await this.memoryService.storeMemory(memoryInsert);
+            // Best-effort replacement for the old Postgres trigger
+            // (notify_graphiti_bridge_on_memory_insert), which fired on every INSERT
+            // into `memories` and no longer exists once storage is Mongo. Never blocks
+            // or fails the store call — matches the trigger's own
+            // `exception when others then raise warning` behavior.
+            void notifyGraphitiBridge(memory);
             return {
                 success: true,
                 memory: {
@@ -43,16 +47,16 @@ export class MemoryStoreTool {
                     source_path: memory.source_path,
                     project_name: memory.project_name,
                     tags: memory.tags,
-                    created_at: memory.created_at
+                    created_at: memory.created_at,
                 },
-                message: `Memory stored successfully with sector: ${sector}`
+                message: `Memory stored successfully with sector: ${sector}`,
             };
         }
         catch (error) {
             return {
                 success: false,
                 error: error instanceof Error ? error.message : 'Unknown error',
-                message: 'Failed to store memory'
+                message: 'Failed to store memory',
             };
         }
     }

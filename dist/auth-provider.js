@@ -1,62 +1,42 @@
 /**
- * Supabase-backed OAuth 2.1 provider for the MCP SDK.
+ * MongoDB-backed OAuth 2.1 provider for the MCP SDK.
  * Implements OAuthServerProvider + OAuthRegisteredClientsStore.
  *
  * authorize() NÃO auto-aprova: delega ao GoogleBroker, que prova a identidade
  * (login Google + allowlist de e-mail) antes de qualquer code ser emitido. O code
  * MCP só é gerado em issueMcpCode(), chamado pelo callback do Google após verificação.
  *
+ * Identity threading: issueMcpCode() only accepts a VerifiedPendingAuth (carries
+ * `email`, proven by GoogleBroker.verifyCallback()). That email is stored alongside
+ * every auth code / access token / refresh token it produces, and verifyAccessToken()
+ * surfaces it back out as AuthInfo.extra.email — the one channel server.ts trusts for
+ * per-user scoping. Nothing in this file ever takes email from client input.
+ *
  * Exported names são mantidos por compat (InMemoryOAuthProvider / InMemoryClientsStore).
  *
  * Env vars required:
- *   SUPABASE_URL              — e.g. https://xxxx.supabase.co
- *   SUPABASE_SERVICE_ROLE_KEY — service role key (bypasses RLS)
+ *   MONGODB_URI — connection string for the dedicated memory-mcp Mongo instance
+ *   MONGODB_DB  — database name
  */
 import { randomUUID, randomBytes } from 'node:crypto';
-import { createClient } from '@supabase/supabase-js';
+import { getMongoDb } from './services/mongo.js';
 const ACCESS_TOKEN_TTL = 3600; // 1 hour in seconds
 const AUTH_CODE_TTL = 300; // 5 minutes in seconds
 // ---------------------------------------------------------------------------
-// Supabase client (singleton — shared by both classes)
-// ---------------------------------------------------------------------------
-function buildSupabaseClient() {
-    const url = process.env.SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!url || !key) {
-        throw new Error('Missing required env vars: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set');
-    }
-    return createClient(url, key, {
-        auth: {
-            autoRefreshToken: false,
-            persistSession: false,
-        },
-    });
-}
-let _supabase = null;
-function getSupabase() {
-    if (!_supabase)
-        _supabase = buildSupabaseClient();
-    return _supabase;
-}
-// ---------------------------------------------------------------------------
-// SupabaseClientsStore (exported as InMemoryClientsStore for backward compat)
+// MongoClientsStore (exported as InMemoryClientsStore for backward compat)
 // ---------------------------------------------------------------------------
 export class InMemoryClientsStore {
-    db;
+    dbPromise;
     constructor() {
-        this.db = getSupabase();
+        this.dbPromise = getMongoDb();
+    }
+    async col() {
+        const db = await this.dbPromise;
+        return db.collection('oauth_clients');
     }
     async getClient(clientId) {
-        const { data, error } = await this.db
-            .from('oauth_clients')
-            .select('client_data')
-            .eq('client_id', clientId)
-            .maybeSingle();
-        if (error)
-            throw new Error(`getClient DB error: ${error.message}`);
-        if (!data)
-            return undefined;
-        return data.client_data;
+        const doc = await (await this.col()).findOne({ _id: clientId });
+        return doc?.client_data;
     }
     async registerClient(client) {
         const clientId = randomUUID();
@@ -69,25 +49,30 @@ export class InMemoryClientsStore {
             client_secret: clientSecret,
             client_id_issued_at: now,
         };
-        const { error } = await this.db
-            .from('oauth_clients')
-            .insert({ client_id: clientId, client_data: full });
-        if (error)
-            throw new Error(`registerClient DB error: ${error.message}`);
+        await (await this.col()).insertOne({ _id: clientId, client_data: full, created_at: new Date() });
         return full;
     }
 }
 // ---------------------------------------------------------------------------
-// SupabaseOAuthProvider (exported as InMemoryOAuthProvider for backward compat)
+// MongoOAuthProvider (exported as InMemoryOAuthProvider for backward compat)
 // ---------------------------------------------------------------------------
 export class InMemoryOAuthProvider {
     clientsStore;
-    db;
+    dbPromise;
     broker;
     constructor(broker) {
-        this.db = getSupabase();
+        this.dbPromise = getMongoDb();
         this.clientsStore = new InMemoryClientsStore();
         this.broker = broker;
+    }
+    async codesCol() {
+        return (await this.dbPromise).collection('oauth_auth_codes');
+    }
+    async accessTokensCol() {
+        return (await this.dbPromise).collection('oauth_access_tokens');
+    }
+    async refreshTokensCol() {
+        return (await this.dbPromise).collection('oauth_refresh_tokens');
     }
     async authorize(client, params, res) {
         // Não auto-aprova: estaciona o pedido e manda o navegador pro Google.
@@ -103,22 +88,23 @@ export class InMemoryOAuthProvider {
     /**
      * Emite o auth code MCP DEPOIS que a identidade foi provada no Google.
      * CONTRATO: só pode ser chamado pelo callback do Google, com o `pending` retornado
-     * por `GoogleBroker.verifyCallback()` (que já validou e-mail + assinatura). NÃO chame
-     * direto de nenhum outro lugar — isso bypassaria o gate de identidade.
+     * por `GoogleBroker.verifyCallback()` (que já validou e-mail + assinatura, e por isso
+     * é tipado VerifiedPendingAuth — carrega `email`). NÃO chame direto de nenhum outro
+     * lugar — isso bypassaria o gate de identidade.
      */
     async issueMcpCode(pending, res) {
         const code = `code_${randomBytes(24).toString('hex')}`;
-        const now = Math.floor(Date.now() / 1000);
-        const { error } = await this.db.from('oauth_auth_codes').insert({
-            code,
+        const now = Date.now();
+        await (await this.codesCol()).insertOne({
+            _id: code,
             client_id: pending.clientId,
             code_challenge: pending.codeChallenge,
             redirect_uri: pending.redirectUri,
             scopes: pending.scopes ?? [],
-            expires_at: new Date((now + AUTH_CODE_TTL) * 1000).toISOString(),
+            email: pending.email,
+            expires_at: new Date(now + AUTH_CODE_TTL * 1000),
+            created_at: new Date(now),
         });
-        if (error)
-            throw new Error(`issueMcpCode DB error: ${error.message}`);
         const redirectUrl = new URL(pending.redirectUri);
         redirectUrl.searchParams.set('code', code);
         if (pending.state) {
@@ -127,56 +113,44 @@ export class InMemoryOAuthProvider {
         res.redirect(redirectUrl.toString());
     }
     async challengeForAuthorizationCode(_client, authorizationCode) {
-        const { data, error } = await this.db
-            .from('oauth_auth_codes')
-            .select('code_challenge')
-            .eq('code', authorizationCode)
-            .maybeSingle();
-        if (error)
-            throw new Error(`challengeForAuthorizationCode DB error: ${error.message}`);
-        if (!data)
+        const doc = await (await this.codesCol()).findOne({ _id: authorizationCode });
+        if (!doc)
             throw new Error('Authorization code not found');
-        return data.code_challenge;
+        return doc.code_challenge;
     }
     async exchangeAuthorizationCode(client, authorizationCode) {
-        const { data, error } = await this.db
-            .from('oauth_auth_codes')
-            .select('*')
-            .eq('code', authorizationCode)
-            .maybeSingle();
-        if (error)
-            throw new Error(`exchangeAuthorizationCode DB error: ${error.message}`);
-        if (!data)
+        const codesCol = await this.codesCol();
+        const stored = await codesCol.findOne({ _id: authorizationCode });
+        if (!stored)
             throw new Error('Authorization code not found');
-        const stored = data;
         if (stored.client_id !== client.client_id)
             throw new Error('Client mismatch');
-        if (new Date(stored.expires_at).getTime() < Date.now()) {
-            await this.db.from('oauth_auth_codes').delete().eq('code', authorizationCode);
+        if (stored.expires_at.getTime() < Date.now()) {
+            await codesCol.deleteOne({ _id: authorizationCode });
             throw new Error('Authorization code expired');
         }
-        const now = Math.floor(Date.now() / 1000);
+        const now = Date.now();
         const accessToken = `at_${randomBytes(32).toString('hex')}`;
         const refreshToken = `rt_${randomBytes(32).toString('hex')}`;
         // Insert tokens before deleting the code — if inserts fail, code remains
         // usable on retry (no permanent lockout).
-        const { error: atError } = await this.db.from('oauth_access_tokens').insert({
-            token: accessToken,
+        await (await this.accessTokensCol()).insertOne({
+            _id: accessToken,
             client_id: client.client_id,
             scopes: stored.scopes,
-            expires_at: new Date((now + ACCESS_TOKEN_TTL) * 1000).toISOString(),
+            email: stored.email,
+            expires_at: new Date(now + ACCESS_TOKEN_TTL * 1000),
+            created_at: new Date(now),
         });
-        if (atError)
-            throw new Error(`insert access token DB error: ${atError.message}`);
-        const { error: rtError } = await this.db.from('oauth_refresh_tokens').insert({
-            token: refreshToken,
+        await (await this.refreshTokensCol()).insertOne({
+            _id: refreshToken,
             client_id: client.client_id,
             scopes: stored.scopes,
+            email: stored.email,
             expires_at: null,
+            created_at: new Date(now),
         });
-        if (rtError)
-            throw new Error(`insert refresh token DB error: ${rtError.message}`);
-        await this.db.from('oauth_auth_codes').delete().eq('code', authorizationCode);
+        await codesCol.deleteOne({ _id: authorizationCode });
         return {
             access_token: accessToken,
             token_type: 'Bearer',
@@ -186,41 +160,35 @@ export class InMemoryOAuthProvider {
         };
     }
     async exchangeRefreshToken(client, refreshToken, scopes) {
-        const { data, error } = await this.db
-            .from('oauth_refresh_tokens')
-            .select('*')
-            .eq('token', refreshToken)
-            .maybeSingle();
-        if (error)
-            throw new Error(`exchangeRefreshToken DB error: ${error.message}`);
-        if (!data)
+        const refreshCol = await this.refreshTokensCol();
+        const stored = await refreshCol.findOne({ _id: refreshToken });
+        if (!stored)
             throw new Error('Refresh token not found');
-        const stored = data;
         if (stored.client_id !== client.client_id)
             throw new Error('Client mismatch');
-        const now = Math.floor(Date.now() / 1000);
+        const now = Date.now();
         const newAccessToken = `at_${randomBytes(32).toString('hex')}`;
         const newRefreshToken = `rt_${randomBytes(32).toString('hex')}`;
         const effectiveScopes = scopes ?? stored.scopes;
         // Insert new tokens before deleting old — if inserts fail, old refresh
         // token remains valid and client can retry without permanent lockout.
-        const { error: atError } = await this.db.from('oauth_access_tokens').insert({
-            token: newAccessToken,
+        await (await this.accessTokensCol()).insertOne({
+            _id: newAccessToken,
             client_id: client.client_id,
             scopes: effectiveScopes,
-            expires_at: new Date((now + ACCESS_TOKEN_TTL) * 1000).toISOString(),
+            email: stored.email,
+            expires_at: new Date(now + ACCESS_TOKEN_TTL * 1000),
+            created_at: new Date(now),
         });
-        if (atError)
-            throw new Error(`insert access token DB error: ${atError.message}`);
-        const { error: rtError } = await this.db.from('oauth_refresh_tokens').insert({
-            token: newRefreshToken,
+        await refreshCol.insertOne({
+            _id: newRefreshToken,
             client_id: client.client_id,
             scopes: effectiveScopes,
+            email: stored.email,
             expires_at: null,
+            created_at: new Date(now),
         });
-        if (rtError)
-            throw new Error(`insert refresh token DB error: ${rtError.message}`);
-        await this.db.from('oauth_refresh_tokens').delete().eq('token', refreshToken);
+        await refreshCol.deleteOne({ _id: refreshToken });
         return {
             access_token: newAccessToken,
             token_type: 'Bearer',
@@ -230,32 +198,28 @@ export class InMemoryOAuthProvider {
         };
     }
     async verifyAccessToken(token) {
-        const { data, error } = await this.db
-            .from('oauth_access_tokens')
-            .select('*')
-            .eq('token', token)
-            .maybeSingle();
-        if (error)
-            throw new Error(`verifyAccessToken DB error: ${error.message}`);
-        if (!data)
+        const accessCol = await this.accessTokensCol();
+        const stored = await accessCol.findOne({ _id: token });
+        if (!stored)
             throw new Error('Invalid access token');
-        const stored = data;
-        const expiresAtEpoch = Math.floor(new Date(stored.expires_at).getTime() / 1000);
+        const expiresAtEpoch = Math.floor(stored.expires_at.getTime() / 1000);
         if (expiresAtEpoch < Math.floor(Date.now() / 1000)) {
-            await this.db.from('oauth_access_tokens').delete().eq('token', token);
+            await accessCol.deleteOne({ _id: token });
             throw new Error('Access token expired');
         }
         return {
-            token: stored.token,
+            token: stored._id,
             clientId: stored.client_id,
             scopes: stored.scopes,
             expiresAt: expiresAtEpoch,
+            // The one channel server.ts trusts for per-user scoping (see server.ts).
+            extra: { email: stored.email },
         };
     }
     async revokeToken(_client, request) {
         await Promise.all([
-            this.db.from('oauth_access_tokens').delete().eq('token', request.token),
-            this.db.from('oauth_refresh_tokens').delete().eq('token', request.token),
+            (await this.accessTokensCol()).deleteOne({ _id: request.token }),
+            (await this.refreshTokensCol()).deleteOne({ _id: request.token }),
         ]);
     }
 }

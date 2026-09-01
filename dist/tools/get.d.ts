@@ -1,15 +1,16 @@
 /**
  * Memory Get Tool
- * Gets a specific memory by ID
+ * Gets a specific memory by ID, scoped to the authenticated caller.
  */
-import type { SupabaseService } from '../services/supabase.js';
+import type { MongoMemoryService } from '../services/mongo-memory.js';
 export interface MemoryGetInput {
     id: string;
 }
 export declare class MemoryGetTool {
-    private supabase;
-    constructor(supabase: SupabaseService);
-    execute(input: MemoryGetInput): Promise<{
+    private memoryService;
+    constructor(memoryService: MongoMemoryService);
+    /** `userId` is the trusted, server-injected owner email — see server.ts. Never accept it via `input`. */
+    execute(input: MemoryGetInput, userId: string): Promise<{
         success: boolean;
         memory: {
             id: string;

@@ -26,6 +26,30 @@ dotenv.config();
 const PUBLIC_PORT = parseInt(process.env.MCP_HTTP_PORT ?? process.env.PORT ?? '3000', 10);
 const INTERNAL_PORT = parseInt(process.env.INTERNAL_PORT ?? '8767', 10);
 const BASE_URL = process.env.BASE_URL ?? `http://localhost:${PUBLIC_PORT}`;
+/**
+ * The internal service-token bypass MUST map to a named identity — confirmed by Lu
+ * (2026-09-01): headless/automation clients map to her identity by default, no
+ * separate pseudo-user for now. Fail fast at startup rather than let mcp-auth.ts
+ * silently mint an AuthInfo with no email whenever MEMORY_SERVICE_TOKEN is set.
+ */
+function resolveServiceTokenUserEmail() {
+    const serviceToken = process.env.MEMORY_SERVICE_TOKEN;
+    if (!serviceToken)
+        return undefined;
+    const email = process.env.SERVICE_TOKEN_USER_EMAIL;
+    if (!email) {
+        throw new Error('MEMORY_SERVICE_TOKEN is set but SERVICE_TOKEN_USER_EMAIL is missing — refusing to start.');
+    }
+    const allowed = (process.env.ALLOWED_EMAILS ?? '')
+        .split(',')
+        .map((e) => e.trim().toLowerCase())
+        .filter(Boolean);
+    const normalized = email.trim().toLowerCase();
+    if (allowed.length > 0 && !allowed.includes(normalized)) {
+        throw new Error(`SERVICE_TOKEN_USER_EMAIL (${normalized}) is not in ALLOWED_EMAILS.`);
+    }
+    return normalized;
+}
 /** Idle MCP sessions are removed after this many ms (default 24h). */
 const SESSION_TTL_MS = parseInt(process.env.MCP_SESSION_TTL_MS ?? String(24 * 60 * 60 * 1000), 10);
 const SESSION_SWEEP_MS = parseInt(process.env.MCP_SESSION_SWEEP_MS ?? String(15 * 60 * 1000), 10);
@@ -80,6 +104,7 @@ async function main() {
     const mcpAuth = makeMcpAuth({
         internalPort: INTERNAL_PORT,
         serviceToken: process.env.MEMORY_SERVICE_TOKEN,
+        serviceTokenUserEmail: resolveServiceTokenUserEmail(),
         oauthBearer,
     });
     setInterval(sweepIdleSessions, SESSION_SWEEP_MS).unref();

@@ -1,15 +1,16 @@
 /**
  * Memory Reinforce Tool
- * Reinforces a memory by incrementing its access count
+ * Reinforces a memory by incrementing its access count, scoped to the authenticated caller.
  */
-import type { SupabaseService } from '../services/supabase.js';
+import type { MongoMemoryService } from '../services/mongo-memory.js';
 export interface MemoryReinforceInput {
     id: string;
 }
 export declare class MemoryReinforceTool {
-    private supabase;
-    constructor(supabase: SupabaseService);
-    execute(input: MemoryReinforceInput): Promise<{
+    private memoryService;
+    constructor(memoryService: MongoMemoryService);
+    /** `userId` is the trusted, server-injected owner email — see server.ts. Never accept it via `input`. */
+    execute(input: MemoryReinforceInput, userId: string): Promise<{
         success: boolean;
         memory: {
             id: string;

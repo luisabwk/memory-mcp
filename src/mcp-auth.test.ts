@@ -26,18 +26,35 @@ describe('makeMcpAuth', () => {
   it('aceita service token na porta interna sem chamar o OAuth bearer', () => {
     const next = vi.fn();
     const oauthBearer = vi.fn();
-    const mw = makeMcpAuth({ internalPort: 8767, serviceToken: 'svc', oauthBearer });
+    const mw = makeMcpAuth({ internalPort: 8767, serviceToken: 'svc', serviceTokenUserEmail: 'luisa.barwinski@gmail.com', oauthBearer });
     const req: any = { socket: { localPort: 8767 }, headers: { authorization: 'Bearer svc' } };
     mw(req, {} as any, next);
     expect(next).toHaveBeenCalledTimes(1);
     expect(oauthBearer).not.toHaveBeenCalled();
-    expect(req.auth).toEqual({ token: 'internal-service', clientId: 'internal-service', scopes: [] });
+    // Confirmed by Lu (2026-09-01): the service token maps to her identity by
+    // default. server.ts reads exactly this field (extra.email) to scope the call.
+    expect(req.auth).toEqual({
+      token: 'internal-service',
+      clientId: 'internal-service',
+      scopes: [],
+      extra: { email: 'luisa.barwinski@gmail.com' },
+    });
+  });
+
+  it('sem serviceTokenUserEmail configurado, a identidade de serviço não carrega email (server.ts deve recusar)', () => {
+    const next = vi.fn();
+    const oauthBearer = vi.fn();
+    const mw = makeMcpAuth({ internalPort: 8767, serviceToken: 'svc', serviceTokenUserEmail: undefined, oauthBearer });
+    const req: any = { socket: { localPort: 8767 }, headers: { authorization: 'Bearer svc' } };
+    mw(req, {} as any, next);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(req.auth.extra).toBeUndefined();
   });
 
   it('na porta pública, service token é ignorado e cai pro OAuth bearer', () => {
     const next = vi.fn();
     const oauthBearer = vi.fn();
-    const mw = makeMcpAuth({ internalPort: 8767, serviceToken: 'svc', oauthBearer });
+    const mw = makeMcpAuth({ internalPort: 8767, serviceToken: 'svc', serviceTokenUserEmail: 'luisa.barwinski@gmail.com', oauthBearer });
     const req: any = { socket: { localPort: 3000 }, headers: { authorization: 'Bearer svc' } };
     mw(req, {} as any, next);
     expect(oauthBearer).toHaveBeenCalledTimes(1);
@@ -47,7 +64,7 @@ describe('makeMcpAuth', () => {
   it('na porta interna com token errado, cai pro OAuth bearer', () => {
     const next = vi.fn();
     const oauthBearer = vi.fn();
-    const mw = makeMcpAuth({ internalPort: 8767, serviceToken: 'svc', oauthBearer });
+    const mw = makeMcpAuth({ internalPort: 8767, serviceToken: 'svc', serviceTokenUserEmail: 'luisa.barwinski@gmail.com', oauthBearer });
     const req: any = { socket: { localPort: 8767 }, headers: { authorization: 'Bearer nope' } };
     mw(req, {} as any, next);
     expect(oauthBearer).toHaveBeenCalledTimes(1);

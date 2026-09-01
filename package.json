@@ -1,7 +1,7 @@
 {
   "name": "memory-mcp",
   "version": "1.0.0",
-  "description": "MCP server for persistent memory — OAuth 2.1 + Supabase Vector",
+  "description": "MCP server for persistent memory — OAuth 2.1 + MongoDB Vector Search, per-user scoped",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -14,13 +14,15 @@
     "start:http": "node dist/index-http.js",
     "test": "vitest --passWithNoTests",
     "lint": "eslint src/**/*.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "setup:mongo-indexes": "node scripts/setup-mongo-indexes.mjs",
+    "migrate:supabase-to-mongo": "node scripts/migrate-supabase-to-mongo.mjs"
   },
   "keywords": [
     "mcp",
     "memory",
-    "supabase",
-    "vector",
+    "mongodb",
+    "vector-search",
     "embeddings",
     "ai"
   ],
@@ -28,13 +30,14 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.0",
-    "@supabase/supabase-js": "^2.45.4",
     "dotenv": "^16.4.7",
     "express": "^5.2.1",
     "google-auth-library": "^10.6.2",
+    "mongodb": "^6.21.0",
     "openai": "^4.73.0"
   },
   "devDependencies": {
+    "@supabase/supabase-js": "^2.45.4",
     "@types/express": "^5.0.6",
     "@types/node": "^22.10.2",
     "@typescript-eslint/eslint-plugin": "^8.18.2",

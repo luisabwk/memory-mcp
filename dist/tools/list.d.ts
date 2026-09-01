@@ -1,8 +1,8 @@
 /**
  * Memory List Tool
- * Lists memories with filters and pagination
+ * Lists memories with filters and pagination, scoped to the authenticated caller.
  */
-import type { SupabaseService } from '../services/supabase.js';
+import type { MongoMemoryService } from '../services/mongo-memory.js';
 import type { MemorySector, SourceType } from '../types/memory.js';
 export interface MemoryListInput {
     sector?: MemorySector;
@@ -16,9 +16,10 @@ export interface MemoryListInput {
     order?: 'asc' | 'desc';
 }
 export declare class MemoryListTool {
-    private supabase;
-    constructor(supabase: SupabaseService);
-    execute(input: MemoryListInput): Promise<{
+    private memoryService;
+    constructor(memoryService: MongoMemoryService);
+    /** `userId` is the trusted, server-injected owner email — see server.ts. Never accept it via `input`. */
+    execute(input: MemoryListInput, userId: string): Promise<{
         success: boolean;
         memories: {
             id: string;
