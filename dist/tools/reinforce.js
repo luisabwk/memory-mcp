@@ -1,18 +1,17 @@
 /**
  * Memory Reinforce Tool
- * Reinforces a memory by incrementing its access count
+ * Reinforces a memory by incrementing its access count, scoped to the authenticated caller.
  */
 export class MemoryReinforceTool {
-    supabase;
-    constructor(supabase) {
-        this.supabase = supabase;
+    memoryService;
+    constructor(memoryService) {
+        this.memoryService = memoryService;
     }
-    async execute(input) {
+    /** `userId` is the trusted, server-injected owner email — see server.ts. Never accept it via `input`. */
+    async execute(input, userId) {
         try {
-            // Validate input
             this.validateInput(input);
-            // Reinforce memory
-            const memory = await this.supabase.reinforceMemory(input.id);
+            const memory = await this.memoryService.reinforceMemory(input.id, userId);
             return {
                 success: true,
                 memory: {

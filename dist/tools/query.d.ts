@@ -1,8 +1,8 @@
 /**
  * Memory Query Tool
- * Queries memories using vector similarity search
+ * Queries memories using vector similarity search, scoped to the authenticated caller.
  */
-import type { SupabaseService } from '../services/supabase.js';
+import type { MongoMemoryService } from '../services/mongo-memory.js';
 import type { EmbeddingsService } from '../services/embeddings.js';
 import type { MemorySector, SourceType } from '../types/memory.js';
 export interface MemoryQueryInput {
@@ -16,10 +16,11 @@ export interface MemoryQueryInput {
     tags?: string[];
 }
 export declare class MemoryQueryTool {
-    private supabase;
+    private memoryService;
     private embeddings;
-    constructor(supabase: SupabaseService, embeddings: EmbeddingsService);
-    execute(input: MemoryQueryInput): Promise<{
+    constructor(memoryService: MongoMemoryService, embeddings: EmbeddingsService);
+    /** `userId` is the trusted, server-injected owner email — see server.ts. Never accept it via `input`. */
+    execute(input: MemoryQueryInput, userId: string): Promise<{
         success: boolean;
         memories: {
             id: string;

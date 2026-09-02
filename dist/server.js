@@ -4,7 +4,8 @@
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
-import { SupabaseService } from './services/supabase.js';
+import { getMongoDb } from './services/mongo.js';
+import { MongoMemoryService } from './services/mongo-memory.js';
 import { EmbeddingsService } from './services/embeddings.js';
 import { SectorClassifier } from './services/classifier.js';
 import { MemoryStoreTool } from './tools/store.js';
@@ -12,7 +13,7 @@ import { MemoryQueryTool } from './tools/query.js';
 import { MemoryListTool } from './tools/list.js';
 import { MemoryGetTool } from './tools/get.js';
 import { MemoryReinforceTool } from './tools/reinforce.js';
-const requiredEnvVars = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'OPENROUTER_API_KEY'];
+const requiredEnvVars = ['MONGODB_URI', 'MONGODB_DB', 'OPENROUTER_API_KEY'];
 function assertEnv() {
     for (const envVar of requiredEnvVars) {
         if (!process.env[envVar]) {
@@ -120,9 +121,39 @@ function buildTools() {
         },
     ];
 }
-export async function createMemoryMcpServer() {
+/**
+ * The ONLY place tool calls get a user_id from. Never read user_id/email from
+ * client-supplied tool arguments — a client (or the LLM driving it) fully controls
+ * that payload, so trusting it there would let anyone read/write anyone else's
+ * memories just by passing a different email in a tool call.
+ *
+ * Extracted as a pure function so the identity gate can be unit-tested directly,
+ * without spinning up a Server/Mongo/embeddings stack — see server.test.ts.
+ */
+export function resolveUserId(authInfo, stdioUserEmail) {
+    if (authInfo) {
+        // HTTP transport (OAuth bearer or the internal service-token bypass) always
+        // carries an AuthInfo. Its `extra.email` is set exclusively by auth-provider.ts
+        // (from the Google-verified identity) or mcp-auth.ts (service token → Lu's
+        // identity) — never by client input. Missing email here means a bug or a
+        // token minted outside those two paths: refuse rather than guess.
+        const email = authInfo.extra?.email;
+        if (typeof email !== 'string' || email.length === 0) {
+            return { ok: false, error: 'Authenticated but no user identity attached to this session. Refusing to guess an owner for this request.' };
+        }
+        return { ok: true, userId: email };
+    }
+    if (stdioUserEmail) {
+        // True stdio: no auth layer exists at all. Requires an explicit env var set
+        // by the operator (see index.ts) — not a fallback default.
+        return { ok: true, userId: stdioUserEmail };
+    }
+    return { ok: false, error: 'No authenticated identity available for this request.' };
+}
+export async function createMemoryMcpServer(opts = {}) {
     assertEnv();
-    const supabase = new SupabaseService(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+    const db = await getMongoDb();
+    const memoryService = new MongoMemoryService(db);
     // Single provider for the whole stack: OpenRouter. The model must be
     // namespaced (`openai/...`); we normalize a bare model name for back-compat
     // with the existing EMBEDDING_MODEL=text-embedding-3-small env.
@@ -138,28 +169,36 @@ export async function createMemoryMcpServer() {
         },
     });
     const classifier = new SectorClassifier();
-    const storeTool = new MemoryStoreTool(supabase, embeddings, classifier);
-    const queryTool = new MemoryQueryTool(supabase, embeddings);
-    const listTool = new MemoryListTool(supabase);
-    const getTool = new MemoryGetTool(supabase);
-    const reinforceTool = new MemoryReinforceTool(supabase);
+    const storeTool = new MemoryStoreTool(memoryService, embeddings, classifier);
+    const queryTool = new MemoryQueryTool(memoryService, embeddings);
+    const listTool = new MemoryListTool(memoryService);
+    const getTool = new MemoryGetTool(memoryService);
+    const reinforceTool = new MemoryReinforceTool(memoryService);
     const tools = buildTools();
     const server = new Server({ name: 'memory-mcp', version: '1.0.0' }, { capabilities: { tools: {} } });
     server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
-    server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
         const { name, arguments: args } = request.params;
+        const identity = resolveUserId(extra.authInfo, opts.stdioUserEmail);
+        if (!identity.ok) {
+            return {
+                content: [{ type: 'text', text: JSON.stringify({ success: false, error: identity.error }, null, 2) }],
+                isError: true,
+            };
+        }
+        const userId = identity.userId;
         try {
             switch (name) {
                 case 'memory_store':
-                    return { content: [{ type: 'text', text: JSON.stringify(await storeTool.execute(args), null, 2) }] };
+                    return { content: [{ type: 'text', text: JSON.stringify(await storeTool.execute(args, userId), null, 2) }] };
                 case 'memory_query':
-                    return { content: [{ type: 'text', text: JSON.stringify(await queryTool.execute(args), null, 2) }] };
+                    return { content: [{ type: 'text', text: JSON.stringify(await queryTool.execute(args, userId), null, 2) }] };
                 case 'memory_list':
-                    return { content: [{ type: 'text', text: JSON.stringify(await listTool.execute(args), null, 2) }] };
+                    return { content: [{ type: 'text', text: JSON.stringify(await listTool.execute(args, userId), null, 2) }] };
                 case 'memory_get':
-                    return { content: [{ type: 'text', text: JSON.stringify(await getTool.execute(args), null, 2) }] };
+                    return { content: [{ type: 'text', text: JSON.stringify(await getTool.execute(args, userId), null, 2) }] };
                 case 'memory_reinforce':
-                    return { content: [{ type: 'text', text: JSON.stringify(await reinforceTool.execute(args), null, 2) }] };
+                    return { content: [{ type: 'text', text: JSON.stringify(await reinforceTool.execute(args, userId), null, 2) }] };
                 default:
                     throw new Error(`Unknown tool: ${name}`);
             }

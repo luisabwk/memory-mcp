@@ -24,7 +24,13 @@ export function makeMcpAuth(opts) {
         const localPort = req.socket.localPort;
         if (localPort === opts.internalPort && serviceTokenValid(req.headers['authorization'], opts.serviceToken)) {
             // `token` é um placeholder sintético: a identidade de serviço não usa um access token OAuth real.
-            const auth = { token: 'internal-service', clientId: 'internal-service', scopes: [] };
+            // `extra.email` é a mesma identidade confiável que o fluxo OAuth carrega — ver server.ts.
+            const auth = {
+                token: 'internal-service',
+                clientId: 'internal-service',
+                scopes: [],
+                extra: opts.serviceTokenUserEmail ? { email: opts.serviceTokenUserEmail } : undefined,
+            };
             req.auth = auth;
             next();
             return;

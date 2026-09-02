@@ -1,8 +1,8 @@
 /**
  * Memory Store Tool
- * Stores a new memory in the global system
+ * Stores a new memory, scoped to the authenticated caller.
  */
-import type { SupabaseService } from '../services/supabase.js';
+import type { MongoMemoryService } from '../services/mongo-memory.js';
 import type { EmbeddingsService } from '../services/embeddings.js';
 import type { SectorClassifier } from '../services/classifier.js';
 import type { MemorySector, SourceType } from '../types/memory.js';
@@ -17,11 +17,12 @@ export interface MemoryStoreInput {
     tags?: string[];
 }
 export declare class MemoryStoreTool {
-    private supabase;
+    private memoryService;
     private embeddings;
     private classifier;
-    constructor(supabase: SupabaseService, embeddings: EmbeddingsService, classifier: SectorClassifier);
-    execute(input: MemoryStoreInput): Promise<{
+    constructor(memoryService: MongoMemoryService, embeddings: EmbeddingsService, classifier: SectorClassifier);
+    /** `userId` is the trusted, server-injected owner email — see server.ts. Never accept it via `input`. */
+    execute(input: MemoryStoreInput, userId: string): Promise<{
         success: boolean;
         memory: {
             id: string;

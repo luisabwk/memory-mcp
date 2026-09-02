@@ -56,6 +56,9 @@ describe('GoogleBroker', () => {
     const pending = await b.verifyCallback(sid, 'code123');
     expect(pending.clientId).toBe('c1');
     expect(pending.redirectUri).toBe('https://app/cb');
+    // Regression guard for the exact bug this task fixes: verifyCallback used to
+    // destructure email out and never return it. It must be present now.
+    expect(pending.email).toBe('me@gmail.com');
   });
 
   it('verifyCallback é case-insensitive no e-mail', async () => {
@@ -63,7 +66,8 @@ describe('GoogleBroker', () => {
     const sid = startAndCaptureSid(b);
     mockGetToken.mockResolvedValue({ tokens: { id_token: 'idtok' } });
     mockVerifyIdToken.mockResolvedValue({ getPayload: () => ({ email: 'Me@Gmail.com', email_verified: true }) });
-    await expect(b.verifyCallback(sid, 'code')).resolves.toBeTruthy();
+    const pending = await b.verifyCallback(sid, 'code');
+    expect(pending.email).toBe('me@gmail.com');
   });
 
   it('verifyCallback rejeita e-mail fora da allowlist com 403', async () => {

@@ -1,17 +1,16 @@
 /**
  * Memory List Tool
- * Lists memories with filters and pagination
+ * Lists memories with filters and pagination, scoped to the authenticated caller.
  */
 export class MemoryListTool {
-    supabase;
-    constructor(supabase) {
-        this.supabase = supabase;
+    memoryService;
+    constructor(memoryService) {
+        this.memoryService = memoryService;
     }
-    async execute(input) {
+    /** `userId` is the trusted, server-injected owner email — see server.ts. Never accept it via `input`. */
+    async execute(input, userId) {
         try {
-            // Validate input
             this.validateInput(input);
-            // Prepare list params
             const params = {
                 sector: input.sector,
                 source_type: input.source_type,
@@ -21,10 +20,10 @@ export class MemoryListTool {
                 limit: input.limit || 50,
                 offset: input.offset || 0,
                 order_by: input.order_by || 'created_at',
-                order: input.order || 'desc'
+                order: input.order || 'desc',
+                user_id: userId,
             };
-            // Query database
-            const result = await this.supabase.listMemories(params);
+            const result = await this.memoryService.listMemories(params);
             return {
                 success: true,
                 memories: result.memories.map(memory => ({

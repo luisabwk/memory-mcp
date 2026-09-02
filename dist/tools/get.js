@@ -1,18 +1,19 @@
 /**
  * Memory Get Tool
- * Gets a specific memory by ID
+ * Gets a specific memory by ID, scoped to the authenticated caller.
  */
 export class MemoryGetTool {
-    supabase;
-    constructor(supabase) {
-        this.supabase = supabase;
+    memoryService;
+    constructor(memoryService) {
+        this.memoryService = memoryService;
     }
-    async execute(input) {
+    /** `userId` is the trusted, server-injected owner email — see server.ts. Never accept it via `input`. */
+    async execute(input, userId) {
         try {
-            // Validate input
             this.validateInput(input);
-            // Get memory from database
-            const memory = await this.supabase.getMemory(input.id);
+            // Scoped by userId: a memory owned by someone else resolves as not-found,
+            // not as a cross-user leak — see MongoMemoryService.getMemory.
+            const memory = await this.memoryService.getMemory(input.id, userId);
             return {
                 success: true,
                 memory: {

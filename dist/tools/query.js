@@ -1,21 +1,19 @@
 /**
  * Memory Query Tool
- * Queries memories using vector similarity search
+ * Queries memories using vector similarity search, scoped to the authenticated caller.
  */
 export class MemoryQueryTool {
-    supabase;
+    memoryService;
     embeddings;
-    constructor(supabase, embeddings) {
-        this.supabase = supabase;
+    constructor(memoryService, embeddings) {
+        this.memoryService = memoryService;
         this.embeddings = embeddings;
     }
-    async execute(input) {
+    /** `userId` is the trusted, server-injected owner email — see server.ts. Never accept it via `input`. */
+    async execute(input, userId) {
         try {
-            // Validate input
             this.validateInput(input);
-            // Generate query embedding
             const queryEmbedding = await this.embeddings.generateEmbedding(input.query);
-            // Prepare query params
             const params = {
                 query: input.query,
                 limit: input.limit || 10,
@@ -24,10 +22,10 @@ export class MemoryQueryTool {
                 source_type: input.source_type,
                 source_path: input.source_path,
                 project_name: input.project_name,
-                tags: input.tags
+                tags: input.tags,
+                user_id: userId,
             };
-            // Query database
-            const results = await this.supabase.queryMemories(params, queryEmbedding);
+            const results = await this.memoryService.queryMemories(params, queryEmbedding);
             return {
                 success: true,
                 memories: results.map(memory => ({

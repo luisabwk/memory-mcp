@@ -9,6 +9,17 @@ export interface PendingAuth {
   state?: string;
 }
 
+/**
+ * PendingAuth plus the verified Google identity. Only verifyCallback() can produce
+ * this — it's the proof that email is allowlisted and email_verified === true.
+ * Everything downstream of the Google callback (issueMcpCode → token lifecycle →
+ * AuthInfo.extra.email) requires this type, not the bare PendingAuth, so a caller
+ * can't accidentally issue an MCP code without a proven identity attached.
+ */
+export interface VerifiedPendingAuth extends PendingAuth {
+  email: string;
+}
+
 interface StoredPending extends PendingAuth {
   createdAt: number;
 }
@@ -67,7 +78,7 @@ export class GoogleBroker {
    * provedor de identidade. O PKCE do fluxo MCP é enforçado pela camada de cima
    * (auth-provider `challengeForAuthorizationCode`/`exchangeAuthorizationCode`).
    */
-  async verifyCallback(state: string | undefined, code: string | undefined): Promise<PendingAuth> {
+  async verifyCallback(state: string | undefined, code: string | undefined): Promise<VerifiedPendingAuth> {
     if (!state) throw new BrokerError(400, 'Missing state');
     if (!code) throw new BrokerError(400, 'Missing code');
     const stored = this.pending.get(state);
@@ -100,7 +111,9 @@ export class GoogleBroker {
     if (!this.allowed.has(email)) throw new BrokerError(403, 'Email not allowed');
 
     const { createdAt: _createdAt, ...rest } = stored;
-    return rest;
+    // A verificação acima (allowlist + email_verified) é o único lugar do sistema
+    // que prova a identidade — daqui em diante `email` viaja como dado confiável.
+    return { ...rest, email };
   }
 
   private sweep(): void {

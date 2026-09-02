@@ -1,9 +1,9 @@
 /**
  * Memory List Tool
- * Lists memories with filters and pagination
+ * Lists memories with filters and pagination, scoped to the authenticated caller.
  */
 
-import type { SupabaseService } from '../services/supabase.js';
+import type { MongoMemoryService } from '../services/mongo-memory.js';
 import type { MemoryListParams, MemorySector, SourceType } from '../types/memory.js';
 
 export interface MemoryListInput {
@@ -19,14 +19,13 @@ export interface MemoryListInput {
 }
 
 export class MemoryListTool {
-  constructor(private supabase: SupabaseService) {}
+  constructor(private memoryService: MongoMemoryService) {}
 
-  async execute(input: MemoryListInput) {
+  /** `userId` is the trusted, server-injected owner email — see server.ts. Never accept it via `input`. */
+  async execute(input: MemoryListInput, userId: string) {
     try {
-      // Validate input
       this.validateInput(input);
 
-      // Prepare list params
       const params: MemoryListParams = {
         sector: input.sector,
         source_type: input.source_type,
@@ -36,11 +35,11 @@ export class MemoryListTool {
         limit: input.limit || 50,
         offset: input.offset || 0,
         order_by: input.order_by || 'created_at',
-        order: input.order || 'desc'
+        order: input.order || 'desc',
+        user_id: userId,
       };
 
-      // Query database
-      const result = await this.supabase.listMemories(params);
+      const result = await this.memoryService.listMemories(params);
 
       return {
         success: true,

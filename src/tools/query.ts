@@ -1,9 +1,9 @@
 /**
  * Memory Query Tool
- * Queries memories using vector similarity search
+ * Queries memories using vector similarity search, scoped to the authenticated caller.
  */
 
-import type { SupabaseService } from '../services/supabase.js';
+import type { MongoMemoryService } from '../services/mongo-memory.js';
 import type { EmbeddingsService } from '../services/embeddings.js';
 import type { MemoryQueryParams, MemorySector, SourceType } from '../types/memory.js';
 
@@ -20,19 +20,17 @@ export interface MemoryQueryInput {
 
 export class MemoryQueryTool {
   constructor(
-    private supabase: SupabaseService,
+    private memoryService: MongoMemoryService,
     private embeddings: EmbeddingsService
   ) {}
 
-  async execute(input: MemoryQueryInput) {
+  /** `userId` is the trusted, server-injected owner email — see server.ts. Never accept it via `input`. */
+  async execute(input: MemoryQueryInput, userId: string) {
     try {
-      // Validate input
       this.validateInput(input);
 
-      // Generate query embedding
       const queryEmbedding = await this.embeddings.generateEmbedding(input.query);
 
-      // Prepare query params
       const params: MemoryQueryParams = {
         query: input.query,
         limit: input.limit || 10,
@@ -41,11 +39,11 @@ export class MemoryQueryTool {
         source_type: input.source_type,
         source_path: input.source_path,
         project_name: input.project_name,
-        tags: input.tags
+        tags: input.tags,
+        user_id: userId,
       };
 
-      // Query database
-      const results = await this.supabase.queryMemories(params, queryEmbedding);
+      const results = await this.memoryService.queryMemories(params, queryEmbedding);
 
       return {
         success: true,
