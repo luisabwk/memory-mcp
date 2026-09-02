@@ -91,6 +91,26 @@ function assertAllUserIdNull(memories) {
   }
 }
 
+/**
+ * Supabase's pgvector column comes back from supabase-js as a string
+ * ("[0.1,0.2,...]"), not a numeric array — confirmed against the real project
+ * (all 601 rows) during the actual migration run. $vectorSearch requires a real
+ * BSON array of doubles, so a raw string embedding silently passes this script
+ * (no type check) and only fails later, opaquely, inside mongot. Parse it
+ * explicitly instead of trusting the shape, and fail loudly if it isn't what we
+ * expect (Rule 3, analise-quantitativa: what the code assumes about the source
+ * becomes an assertion at load time).
+ */
+function parseEmbedding(raw) {
+  if (Array.isArray(raw)) return raw.map(Number);
+  if (typeof raw === 'string') {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error(`Parsed embedding is not an array: ${raw.slice(0, 50)}`);
+    return parsed.map(Number);
+  }
+  throw new Error(`Unexpected embedding type: ${typeof raw}`);
+}
+
 async function main() {
   console.log(`Mode: ${APPLY ? 'APPLY (writing to Mongo)' : 'DRY RUN (no writes — pass --apply to write)'}`);
   console.log(`Backfilling ownership to: ${OWNER_EMAIL}`);
@@ -123,7 +143,7 @@ async function main() {
       replacement: {
         _id: m.id,
         content: m.content,
-        embedding: m.embedding,
+        embedding: parseEmbedding(m.embedding),
         sector: m.sector,
         source_type: m.source_type,
         source_path: m.source_path ?? undefined,
